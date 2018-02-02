@@ -3,7 +3,7 @@ platform: linux
 image_resource:
   type: docker-image
   source:
-    repository: starkandwayne/concourse
+    repository: pcfkubo/kubo-ci
     tag: latest
 
 inputs:
@@ -11,17 +11,15 @@ inputs:
 - name: git-docker-boshrelease
 
 outputs:
-- name: gh
-- name: pushme
+- name: github-release
+- name: git-docker-boshrelease-output
 - name: notifications
 
 params:
   AWS_ACCESS_KEY:
   AWS_SECRET_KEY:
-  BRANCH:
   GIT_EMAIL:
   GIT_NAME:
-  GITHUB_OWNER:
   NOTIFICATION_OUT:
   RELEASE_ROOT:
   REPO_OUT:
@@ -29,4 +27,4 @@ params:
   VERSION_FROM:
 
 run:
-  path: git-docker-boshrelease/ci/scripts/shipit
+  path: git-docker-boshrelease/ci/scripts/ship-it

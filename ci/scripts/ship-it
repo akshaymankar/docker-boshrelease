@@ -1,0 +1,151 @@
+#!/bin/bash
+
+set -exuo pipefail
+
+export BOSH_LOG_LEVEL=debug
+export BOSH_LOG_PATH="$PWD/bosh.log"
+
+header() {
+	echo
+	echo "###############################################"
+	echo
+	echo $*
+	echo
+}
+
+get_version() {
+  if [[ ! -f ${VERSION_FROM} ]]; then
+    echo >&2 "Version file (${VERSION_FROM}) not found.  Did you misconfigure Concourse?"
+    exit 2
+  fi
+
+  VERSION=$(cat "$VERSION_FROM")
+
+  if [[ -z ${VERSION} ]]; then
+    echo >&2 "Version file (${VERSION_FROM}) was empty.  Did you misconfigure Concourse?"
+    exit 2
+  fi
+
+  echo "$VERSION"
+}
+
+get_release_name() {
+  bosh int "${REPO_ROOT}/config/final.yml" --path /final_name
+}
+
+check_for_release_notes() {
+  if [[ ! -f ${REPO_ROOT}/ci/release_notes.md ]]; then
+    echo >&2 "ci/release_notes.md not found.  Did you forget to write them?"
+    exit 1
+  fi
+}
+
+generate_private_config() {
+  header "generating private.yml ..."
+  cat > ${REPO_OUT}/config/private.yml << EOF
+  ---
+  blobstore:
+    provider: s3
+    options:
+      access_key_id: ${AWS_ACCESS_KEY}
+      secret_access_key: ${AWS_SECRET_KEY}
+EOF
+}
+
+update_submodules() {
+  header "Updating git submodules..."
+  git -C "${REPO_OUT}" submodule update --init --recursive --force
+}
+
+create_final_release() {
+  local version=$1
+  local release_name=$2
+  local release_tarball=$3
+
+  header "Creating final release ..."
+
+  bosh create-release \
+    --final \
+    --dir=${REPO_OUT} \
+    --version="${version}" \
+    --sha2 \
+    --tarball "$release_tarball"
+}
+
+generate_release_artifacts() {
+  local version=$1
+  local release_name=$2
+  local sha1=$3
+
+  echo "docker-boshrelease ${version}" > "${RELEASE_ROOT}/name"
+  echo "v${version}" > "${RELEASE_ROOT}/tag"
+  mv "${REPO_OUT}/ci/release_notes.md" "${RELEASE_ROOT}/body"
+
+  cat >> ${RELEASE_ROOT}/body <<EOF
+
+### Deployment
+\`\`\`yaml
+releases:
+- name: $release_name
+  version: $version
+  url: https://github.com/cloudfoundry-incubator/docker-boshrelease/releases/download/v${version}/${release_name}-${version}.tgz
+  sha1: $sha1
+\`\`\`
+EOF
+}
+
+create_notification_message() {
+  local version=$1
+  local release_name=$2
+  cat > ${NOTIFICATION_OUT:-notifications}/message <<EOF
+  New ${release_name} v${version} released. <https://github.com/cloudfoundry-incubator/docker-boshrelease/releases/tag/v${version}|Release notes>.
+EOF
+}
+
+commit_tag_and_merge_release() {
+  local version=$1
+
+  git config --global user.name "${GIT_NAME}"
+  git config --global user.email "${GIT_EMAIL}"
+
+  header "Create release branch"
+  git -C "$REPO_OUT" checkout -b tmp/release
+  git -C "$REPO_OUT" add .
+
+  header "Commit and tag release branch"
+  git -C "$REPO_OUT" commit -m "Final release for v${version}"
+  git -C "$REPO_OUT" tag -a "v${version}" -m "Tag for version v${version}"
+
+  header "Merge release branch into master"
+  git -C "$REPO_OUT" checkout master
+  git -C "$REPO_OUT" merge tmp/release -m "Merge release branch for v${version}"
+  git -C "$REPO_OUT" branch -d tmp/release
+}
+
+main() {
+  local version release_name sha1 release_tarball
+
+  check_for_release_notes
+  version=$(get_version)
+  release_name=$(get_release_name)
+  release_tarball="${RELEASE_ROOT}/artifacts/${release_name}-${version}.tgz"
+  cp -r "${REPO_ROOT}" "${REPO_OUT}"
+  generate_private_config
+  update_submodules
+  create_final_release "$version" "$release_name" "$release_tarball"
+  sha1=$(sha1sum "$release_tarball" | head -n1 | awk '{print $1}')
+  generate_release_artifacts "$version" "$release_name" "$sha1"
+  create_notification_message "$version" "$release_name"
+  commit_tag_and_merge_release "$version"
+}
+
+: "${REPO_ROOT:?required}"
+: "${RELEASE_ROOT:?required}"
+: "${REPO_OUT:?required}"
+: "${VERSION_FROM:?required}"
+: "${AWS_ACCESS_KEY:?required}"
+: "${AWS_SECRET_KEY:?required}"
+: "${GIT_EMAIL:?required}"
+: "${GIT_NAME:?required}"
+
+main
