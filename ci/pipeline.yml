@@ -61,8 +61,8 @@ resources:
   source:
     bucket: docker-boshrelease
     region_name: us-east-1
-    access_key_id: invalid
-    secret_access_key: invalid
+    access_key_id: ((docker-boshrelease-aws-access-key-id))
+    secret_access_key: ((docker-boshrelease-aws-access-key-id))
     regexp: docker-(.*).tgz
 
 jobs:
@@ -78,8 +78,6 @@ jobs:
       - task: test-docker-boshrelease
         file: git-docker-boshrelease/ci/tasks/test-docker-boshrelease.yml
         params: &test_docker_boshrelease_params
-          AWS_ACCESS_KEY: invalid
-          AWS_SECRET_KEY: invalid
           PROXY_PRIVATE_KEY: ((docker-bosh.proxy-private-key))
           PROXY_USERNAME: ((docker-bosh.proxy-username))
           PROXY_IP: ((docker-bosh.proxy-ip))
@@ -222,31 +220,29 @@ jobs:
     - task: release
       file: git-docker-boshrelease/ci/tasks/ship-it.yml
       params:
-        AWS_ACCESS_KEY: invalid
-        AWS_SECRET_KEY: invalid
-        BRANCH: master
-        GIT_EMAIL: invalid
-        GIT_NAME: invalid
-        GITHUB_OWNER: cloudfoundry-community
+        AWS_ACCESS_KEY: ((docker-boshrelease-aws-access-key-id))
+        AWS_SECRET_KEY: ((docker-boshrelease-aws-access-key-secret))
+        GIT_EMAIL: cfcr@pivotal.io
+        GIT_NAME: CFCR Bot
         NOTIFICATION_OUT: notifications
-        RELEASE_ROOT: gh
-        REPO_OUT: pushme
+        RELEASE_ROOT: github-release
+        REPO_OUT: git-docker-boshrelease-output
         REPO_ROOT: git-docker-boshrelease
         VERSION_FROM: version/number
     - put: git-docker-boshrelease
       params:
         rebase: true
-        repository: pushme/git-docker-boshrelease
+        repository: git-docker-boshrelease-output
     - put: s3-tarball
       params:
-        file: gh/artifacts/docker-*.tgz
+        file: github-release/artifacts/docker-*.tgz
     - put: github-release
       params:
-        body: gh/notes.md
+        body: github-release/body
         globs:
-        - gh/artifacts/*
-        name: gh/name
-        tag: gh/tag
+        - github-release/artifacts/*
+        name: github-release/name
+        tag: github-release/tag
     - put: version
       params:
         bump: patch
